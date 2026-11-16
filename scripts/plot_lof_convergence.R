@@ -1,0 +1,35 @@
+source("results/baps_palette.R")
+library(tidyverse)
+library(patchwork)
+library(scales)
+library(ggrepel)
+base <- normalizePath('results/3.6_LoF_analysis/results', mustWork=TRUE)
+out <- normalizePath('results/3.6_LoF_analysis/results/plotcase_figures', mustWork=FALSE)
+dir.create(out,showWarnings=FALSE)
+b <- read_tsv(file.path(base,'sample_LoF_burden.tsv'),show_col_types=FALSE)
+g <- read_tsv(file.path(base,'gene_LoF_summary.tsv'),show_col_types=FALSE)
+cat <- read_tsv(file.path(base,'functional_category_summary.tsv'),show_col_types=FALSE)
+e <- read_tsv(file.path(base,'LoF_events_with_metadata.tsv'),show_col_types=FALSE)
+# A: burden
+pA <- ggplot(b,aes(LoF_events)) + geom_histogram(binwidth=1,fill='#4C78A8',colour='white') + geom_vline(xintercept=median(b$LoF_events),linetype=2,colour='#D55E00',linewidth=.8) + coord_cartesian(xlim=c(0,50)) + labs(x='Strict LoF events per isolate (0–50 shown)',y='Number of isolates',title='A  LoF burden') + annotate('text',x=48,y=190,label=paste0('n = ',nrow(b),'\nmean = ',round(mean(b$LoF_events),2),'\nmedian = ',median(b$LoF_events)),hjust=1,vjust=1,size=3.2) + theme_classic(base_size=10)
+# B: top genes
+top <- g %>% slice_max(samples,n=20,with_ties=FALSE) %>% arrange(samples) %>% mutate(gene_key=factor(gene_key,levels=gene_key),focus=gene_key %in% c('mucA','mexB','lasR','oprD','mutS','mutL','ampD','algU'))
+pB <- ggplot(top,aes(samples,gene_key,colour=focus)) + geom_segment(aes(x=0,xend=samples,y=gene_key,yend=gene_key),colour='grey75') + geom_point(size=3.2) + scale_colour_manual(values=c('FALSE'='#777777','TRUE'='#D55E00'),guide='none') + labs(x='Isolates carrying LoF',y=NULL,title='B  Most frequent LoF genes') + theme_classic(base_size=10)
+# C: convergence
+focus <- c('mucA','mexB','lasR','oprD','mutS','mutL','ampD','algU')
+# avoid optional ggrepel dependency
+pC <- ggplot(g %>% filter(independent_origins>0),aes(independent_origins,independent_ST,size=samples,colour=independent_subclades)) + geom_point(alpha=.8) + geom_text_repel(data=g %>% filter(gene_key %in% focus),aes(label=gene_key),size=3,box.padding=.45,point.padding=.35,force=2,segment.colour='grey45',segment.linewidth=.35,min.segment.length=0,max.overlaps=Inf) + scale_colour_gradientn(colours=unname(BAPS_COLORS), values=scales::rescale(1:8), breaks=1:8, labels=paste0("BAPS",1:8)) + scale_size_area(max_size=10) + labs(x='Independent LoF alleles',y='Independent STs',colour='Independent subclades',size='Isolates',title='C  Recurrent targets across genetic backgrounds') + theme_classic(base_size=10)
+# D: categories
+cat <- cat %>% mutate(category=factor(category,levels=category[order(independent_origins)]))
+pD <- ggplot(cat,aes(independent_origins,category,fill=category)) + geom_col(show.legend=FALSE) + geom_text(aes(label=independent_origins),hjust=-.2,size=3) + scale_x_continuous(expand=expansion(mult=c(0,.12))) + labs(x='Independent LoF alleles',y=NULL,title='D  Functional categories') + theme_classic(base_size=10)
+fig <- (pA|pB)/(pC|pD) + plot_annotation(title='Convergent evolution and adaptive loss-of-function variation',theme=theme(plot.title=element_text(face='bold',size=16)))
+ggsave(file.path(out,'Figure_X_LoF_convergence_plotcase.pdf'),fig,width=12,height=9,device=cairo_pdf)
+ggsave(file.path(out,'Figure_X_LoF_convergence_plotcase.png'),fig,width=12,height=9,dpi=400)
+# supplemental focal heatmap
+focus10 <- c('mucA','mexB','lasR','oprD','mutS','mutL','ampD','algU','wspF','dacB')
+long <- e %>% filter(gene_key %in% focus10) %>% distinct(sample,gene_key,mutation_class) %>% mutate(value=case_when(mutation_class=='frameshift'~'Frameshift',mutation_class=='nonsense'~'Nonsense',TRUE~mutation_class))
+mat <- expand_grid(sample=unique(b$sample),gene_key=focus10) %>% left_join(long,by=c('sample','gene_key')) %>% mutate(value=replace_na(value,'None'))
+ord <- b %>% arrange(desc(LoF_events)) %>% pull(sample); mat$sample=factor(mat$sample,levels=ord)
+pH <- ggplot(mat,aes(gene_key,sample,fill=value))+geom_tile() + scale_fill_manual(values=c(None='white',Frameshift='#2166AC',Nonsense='#D6604D'),drop=FALSE) + labs(x='Focal LoF gene',y='Isolates ordered by total LoF burden',fill=NULL,title='Distribution of focal LoF genes') + theme_minimal(base_size=9)+theme(axis.text.y=element_blank(),panel.grid=element_blank(),legend.position='right')
+ggsave(file.path(out,'Supp_Figure_X_focal_LoF_heatmap_plotcase.pdf'),pH,width=7,height=11,device=cairo_pdf)
+ggsave(file.path(out,'Supp_Figure_X_focal_LoF_heatmap_plotcase.png'),pH,width=7,height=11,dpi=400)
